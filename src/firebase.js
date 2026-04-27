@@ -1,7 +1,18 @@
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 let _db = null;
 let _initialized = false;
+
+// Re-export the key through Node.js crypto → guarantees clean PEM regardless of source format
+function normalizePEM(rawKey) {
+  const pem = rawKey.replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim();
+  try {
+    return crypto.createPrivateKey(pem).export({ type: 'pkcs8', format: 'pem' });
+  } catch (_) {
+    return pem;
+  }
+}
 
 function initFirebase() {
   if (_initialized) return;
@@ -9,20 +20,19 @@ function initFirebase() {
   let serviceAccount;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
-    // ✅ Preferred on Render: single Base64-encoded JSON — no newline issues
     serviceAccount = JSON.parse(
       Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8')
     );
-    console.log('[Firebase] using FIREBASE_SERVICE_ACCOUNT_B64');
+    serviceAccount.private_key = normalizePEM(serviceAccount.private_key);
+    console.log('[Firebase] using B64, key length:', serviceAccount.private_key.length);
   } else {
-    // Fallback: individual env vars (local dev with .env)
-    const key = process.env.FIREBASE_PRIVATE_KEY;
+    const key = process.env.FIREBASE_PRIVATE_KEY || '';
     serviceAccount = {
       project_id:   process.env.FIREBASE_PROJECT_ID,
       client_email: process.env.FIREBASE_CLIENT_EMAIL,
-      private_key:  key?.replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim(),
+      private_key:  normalizePEM(key),
     };
-    console.log('[Firebase] using individual env vars, project_id:', serviceAccount.project_id);
+    console.log('[Firebase] using env vars, project_id:', serviceAccount.project_id);
   }
 
   const credential = admin.credential.cert(serviceAccount);
