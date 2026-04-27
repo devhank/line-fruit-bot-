@@ -7,10 +7,10 @@ function initFirebase() {
   if (_initialized) return;
 
   const credential = admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    // dotenv stores \n as literal backslash-n; restore actual newlines
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    // Render stores key as multi-line; local .env stores \n as literal — handle both
+    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
   });
 
   admin.initializeApp({
