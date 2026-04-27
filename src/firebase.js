@@ -6,11 +6,20 @@ let _initialized = false;
 function initFirebase() {
   if (_initialized) return;
 
+  const pid  = process.env.FIREBASE_PROJECT_ID;
+  const email = process.env.FIREBASE_CLIENT_EMAIL;
+  const key   = process.env.FIREBASE_PRIVATE_KEY;
+
+  console.log('[Firebase] env check:', {
+    FIREBASE_PROJECT_ID:   pid   ? `"${pid}"` : 'MISSING ❌',
+    FIREBASE_CLIENT_EMAIL: email ? 'SET ✓'    : 'MISSING ❌',
+    FIREBASE_PRIVATE_KEY:  key   ? `SET ✓ (${key.length} chars)` : 'MISSING ❌',
+  });
+
   const credential = admin.credential.cert({
-    project_id: process.env.FIREBASE_PROJECT_ID,
-    client_email: process.env.FIREBASE_CLIENT_EMAIL,
-    // Render stores key as multi-line; local .env stores \n as literal — handle both
-    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    project_id:   pid,
+    client_email: email,
+    private_key:  key?.replace(/\\n/g, '\n'),
   });
 
   admin.initializeApp({
