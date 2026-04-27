@@ -4,7 +4,7 @@
   "description": "LINE OA Bot สำหรับขายผลไม้ พร้อมระบบแจ้งราคาอัตโนมัติ",
   "main": "src/index.js",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node src/index.js",
