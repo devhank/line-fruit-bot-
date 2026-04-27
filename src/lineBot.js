@@ -3,16 +3,18 @@ const { scrapeFruitPrices } = require('./scraper');
 const { buildFlexMessage } = require('./broadcast');
 const { saveUser, getLatestPrices } = require('./firebase');
 
-const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
-};
+// Lazy init — read env vars at request time, not at module load
+function getMiddleware() {
+  return middleware({ channelSecret: process.env.LINE_CHANNEL_SECRET });
+}
 
-const webhookMiddleware = middleware({ channelSecret: lineConfig.channelSecret });
+function webhookMiddleware(req, res, next) {
+  return getMiddleware()(req, res, next);
+}
 
 function getClient() {
   return new messagingApi.MessagingApiClient({
-    channelAccessToken: lineConfig.channelAccessToken,
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   });
 }
 
