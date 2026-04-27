@@ -4,14 +4,15 @@ const crypto = require('crypto');
 let _db = null;
 let _initialized = false;
 
-// Re-export the key through Node.js crypto → guarantees clean PEM regardless of source format
+// Rebuild PEM from raw base64 — guarantees exactly 64-char lines that node-forge accepts
 function normalizePEM(rawKey) {
   const pem = rawKey.replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim();
-  try {
-    return crypto.createPrivateKey(pem).export({ type: 'pkcs8', format: 'pem' });
-  } catch (_) {
-    return pem;
-  }
+  const b64 = pem
+    .replace(/-----BEGIN [A-Z ]+-----/g, '')
+    .replace(/-----END [A-Z ]+-----/g, '')
+    .replace(/\s+/g, '');
+  const lines = b64.match(/.{1,64}/g) || [];
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
 }
 
 function initFirebase() {
