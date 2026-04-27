@@ -1,0 +1,36 @@
+﻿services:
+  - type: web
+    name: line-fruit-bot
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: npm install --production
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+
+      # ── LINE ──────────────────────────────────────────────
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false          # ใส่ใน Render Dashboard (ไม่เก็บใน repo)
+
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+
+      # ── Firebase ──────────────────────────────────────────
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false          # วาง private key ทั้งก้อนใน Render Dashboard
+
+      # ── Admin ─────────────────────────────────────────────
+      - key: ADMIN_TOKEN
+        generateValue: true  # Render สร้าง random token ให้อัตโนมัติ
