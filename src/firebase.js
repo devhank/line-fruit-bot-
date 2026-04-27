@@ -3,6 +3,15 @@ const admin = require('firebase-admin');
 let _db = null;
 let _initialized = false;
 
+function normalizePrivateKey(key) {
+  if (!key) return undefined;
+  return key
+    .replace(/\\n/g, '\n')       // literal \n  → actual newline
+    .replace(/\r\n/g, '\n')      // CRLF        → LF
+    .replace(/^['"]+|['"]+$/g, '') // strip surrounding quotes if any
+    .trim();
+}
+
 function initFirebase() {
   if (_initialized) return;
 
@@ -13,13 +22,13 @@ function initFirebase() {
   console.log('[Firebase] env check:', {
     FIREBASE_PROJECT_ID:   pid   ? `"${pid}"` : 'MISSING ❌',
     FIREBASE_CLIENT_EMAIL: email ? 'SET ✓'    : 'MISSING ❌',
-    FIREBASE_PRIVATE_KEY:  key   ? `SET ✓ (${key.length} chars)` : 'MISSING ❌',
+    FIREBASE_PRIVATE_KEY:  key   ? `SET ✓ (${key.length} chars, starts: ${key.slice(0,20)})` : 'MISSING ❌',
   });
 
   const credential = admin.credential.cert({
     project_id:   pid,
     client_email: email,
-    private_key:  key?.replace(/\\n/g, '\n'),
+    private_key:  normalizePrivateKey(key),
   });
 
   admin.initializeApp({
