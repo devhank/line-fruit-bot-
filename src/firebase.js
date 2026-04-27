@@ -3,38 +3,30 @@ const admin = require('firebase-admin');
 let _db = null;
 let _initialized = false;
 
-function normalizePrivateKey(key) {
-  if (!key) return undefined;
-  return key
-    .replace(/\\n/g, '\n')       // literal \n  → actual newline
-    .replace(/\r\n/g, '\n')      // CRLF        → LF
-    .replace(/^['"]+|['"]+$/g, '') // strip surrounding quotes if any
-    .trim();
-}
-
 function initFirebase() {
   if (_initialized) return;
 
-  const pid  = process.env.FIREBASE_PROJECT_ID;
-  const email = process.env.FIREBASE_CLIENT_EMAIL;
-  const key   = process.env.FIREBASE_PRIVATE_KEY;
+  let serviceAccount;
 
-  console.log('[Firebase] env check:', {
-    FIREBASE_PROJECT_ID:   pid   ? `"${pid}"` : 'MISSING ❌',
-    FIREBASE_CLIENT_EMAIL: email ? 'SET ✓'    : 'MISSING ❌',
-    FIREBASE_PRIVATE_KEY:  key   ? `SET ✓ (${key.length} chars, starts: ${key.slice(0,20)})` : 'MISSING ❌',
-  });
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
+    // ✅ Preferred on Render: single Base64-encoded JSON — no newline issues
+    serviceAccount = JSON.parse(
+      Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8')
+    );
+    console.log('[Firebase] using FIREBASE_SERVICE_ACCOUNT_B64');
+  } else {
+    // Fallback: individual env vars (local dev with .env)
+    const key = process.env.FIREBASE_PRIVATE_KEY;
+    serviceAccount = {
+      project_id:   process.env.FIREBASE_PROJECT_ID,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key:  key?.replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim(),
+    };
+    console.log('[Firebase] using individual env vars, project_id:', serviceAccount.project_id);
+  }
 
-  const credential = admin.credential.cert({
-    project_id:   pid,
-    client_email: email,
-    private_key:  normalizePrivateKey(key),
-  });
-
-  admin.initializeApp({
-    credential,
-    projectId: process.env.FIREBASE_PROJECT_ID,
-  });
+  const credential = admin.credential.cert(serviceAccount);
+  admin.initializeApp({ credential, projectId: serviceAccount.project_id });
 
   _db = admin.firestore();
   _initialized = true;
@@ -46,7 +38,6 @@ function getDb() {
   return _db;
 }
 
-// Save today's price snapshot
 async function savePriceSnapshot(prices) {
   const db = getDb();
   const today = new Date().toISOString().slice(0, 10);
@@ -57,7 +48,6 @@ async function savePriceSnapshot(prices) {
   });
 }
 
-// Get latest price snapshot
 async function getLatestPrices() {
   const db = getDb();
   const today = new Date().toISOString().slice(0, 10);
@@ -65,7 +55,6 @@ async function getLatestPrices() {
   return doc.exists ? doc.data().prices : null;
 }
 
-// Save a LINE user ID when they add the bot
 async function saveUser(userId, displayName = '') {
   const db = getDb();
   await db.collection('users').doc(userId).set(
@@ -74,7 +63,6 @@ async function saveUser(userId, displayName = '') {
   );
 }
 
-// Get all subscribed user IDs for multicast (max 500 per call)
 async function getAllUserIds() {
   const db = getDb();
   const snapshot = await db.collection('users').get();
