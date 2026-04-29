@@ -61,6 +61,20 @@ app.post('/admin/setup-richmenu', express.json(), async (req, res) => {
   }
 });
 
+// ─── Self-ping (prevent Render free tier sleep) ───────────────────────────────
+if (process.env.NODE_ENV === 'production' && process.env.RENDER_EXTERNAL_URL) {
+  const pingUrl = process.env.RENDER_EXTERNAL_URL;
+  setInterval(async () => {
+    try {
+      await fetch(pingUrl);
+      console.log('🏓 Self-ping OK:', new Date().toLocaleTimeString('th-TH'));
+    } catch (err) {
+      console.warn('⚠️ Self-ping fail:', err.message);
+    }
+  }, 14 * 60 * 1000);
+  console.log('🔄 Self-ping เริ่มทำงาน:', pingUrl);
+}
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
