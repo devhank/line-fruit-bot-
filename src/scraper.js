@@ -1,95 +1,195 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
+'use strict';
+require('dotenv').config();
 
-const MOCK_PRICES = [
-  { name: 'ทุเรียน', unit: 'กก.', min: 150, max: 200, trend: '↑' },
-  { name: 'มังคุด', unit: 'กก.', min: 80, max: 120, trend: '→' },
-  { name: 'เงาะ', unit: 'กก.', min: 30, max: 50, trend: '↓' },
-  { name: 'ลำไย', unit: 'กก.', min: 40, max: 65, trend: '↑' },
-  { name: 'มะม่วง', unit: 'กก.', min: 35, max: 70, trend: '→' },
-  { name: 'สับปะรด', unit: 'ลูก', min: 15, max: 25, trend: '↓' },
-  { name: 'กล้วยหอม', unit: 'หวี', min: 20, max: 35, trend: '→' },
-  { name: 'ส้มเขียวหวาน', unit: 'กก.', min: 30, max: 50, trend: '↑' },
-  { name: 'แตงโม', unit: 'กก.', min: 10, max: 18, trend: '↓' },
-  { name: 'องุ่น', unit: 'กก.', min: 80, max: 150, trend: '→' },
+// Models ordered by preference — gemini-2.0-flash first (user request), fallback to 2.5-x
+const GROUNDING_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+const FRUIT_LIST = [
+  'ทุเรียนหมอนทอง',
+  'ทุเรียนชะนี',
+  'มังคุด',
+  'เงาะโรงเรียน',
+  'ลำไย',
+  'ลิ้นจี่',
+  'ลองกอง',
+  'มะม่วงน้ำดอกไม้',
+  'สับปะรด',
+  'กล้วยหอม',
 ];
 
-const SCRAPE_URL = 'https://www.talaadthai.com/th/price';
-const HEADERS = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-  'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
-};
+const MOCK_PRICES = [
+  { name: 'ทุเรียนหมอนทอง', price: '130-150', unit: 'บาท/กก.', trend: '→' },
+  { name: 'มังคุด',          price: '80-100',  unit: 'บาท/กก.', trend: '↑' },
+  { name: 'เงาะโรงเรียน',   price: '40-60',   unit: 'บาท/กก.', trend: '↓' },
+  { name: 'ลำไย',            price: '50-70',   unit: 'บาท/กก.', trend: '→' },
+  { name: 'ลิ้นจี่',         price: '70-90',   unit: 'บาท/กก.', trend: '↑' },
+  { name: 'มะม่วงน้ำดอกไม้', price: '40-60',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'สับปะรด',         price: '15-25',   unit: 'บาท/กก.', trend: '↓' },
+  { name: 'กล้วยหอม',        price: '25-35',   unit: 'บาท/หวี', trend: '→' },
+];
 
-function parsePrice(text) {
-  const cleaned = text.replace(/[^\d.-]/g, '');
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? null : num;
+// ─── Gemini v1beta + Google Search Grounding ─────────────────────────────────
+
+function buildPricePrompt() {
+  return (
+    `คุณเป็นผู้เชี่ยวชาญด้านราคาผลไม้ไทย ค้นหาราคาผลไม้จากแหล่งข่าวล่าสุด\n\n` +
+    `กฎสำคัญ:\n` +
+    `1. ตอบเฉพาะ JSON array เท่านั้น ไม่มีข้อความอื่น ไม่มี markdown\n` +
+    `2. ถ้าหาราคาไม่เจอให้ข้ามผลไม้นั้น\n` +
+    `3. ราคาใส่เป็น string เช่น "130-150" หรือ "150"\n` +
+    `4. trend: "↑" ราคาขึ้น, "↓" ราคาลง, "→" ทรงตัว\n` +
+    `5. unit ใส่หน่วยจริง เช่น "บาท/กก." หรือ "บาท/ลูก"\n` +
+    `6. source ใส่ชื่อแหล่งข่าว เช่น "ตลาดไท" หรือ "กรมส่งเสริมการเกษตร"\n\n` +
+    `ผลไม้ที่ต้องการ: ${FRUIT_LIST.join(', ')}\n\n` +
+    `ตัวอย่าง output:\n` +
+    `[{"name":"ทุเรียนหมอนทอง","price":"130-150","unit":"บาท/กก.","trend":"↓","source":"ตลาดไท"}]\n\n` +
+    `ราคาผลไม้ไทยในตลาดวันนี้คือเท่าไหร่`
+  );
 }
 
-function parsePriceRange(text) {
-  const parts = text.split(/[-–]/);
-  if (parts.length >= 2) {
-    return { min: parsePrice(parts[0]), max: parsePrice(parts[1]) };
+async function callGeminiWithGrounding(model) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === 'your_gemini_api_key_here') throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const body = {
+    contents: [{ parts: [{ text: buildPricePrompt() }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.1 },
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) await new Promise(r => setTimeout(r, attempt * 2000));
+    try {
+      const res  = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = data.error?.message || `HTTP ${res.status}`;
+        if (res.status === 429) throw Object.assign(new Error(msg), { quota: true });
+        if (res.status === 503) { console.warn(`[${model}] overloaded (attempt ${attempt})`); continue; }
+        throw new Error(msg);
+      }
+
+      const text         = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const hasGrounding = !!data.candidates?.[0]?.groundingMetadata;
+      const sources      = data.candidates?.[0]?.groundingMetadata?.groundingChunks
+        ?.map(c => c.web?.title || c.web?.uri || '')
+        .filter(Boolean) || [];
+
+      console.log(`✅ Gemini (${model}) ตอบแล้ว — grounding=${hasGrounding}, sources=${sources.length}`);
+      return { text, sources };
+    } catch (err) {
+      if (err.quota) throw err;
+      if (attempt === 3) throw err;
+      console.warn(`[${model}] attempt ${attempt} fail: ${err.message}`);
+    }
   }
-  const single = parsePrice(text);
-  return { min: single, max: single };
+  throw new Error(`[${model}] หมด retry`);
 }
 
-async function scrapeFromTalaadthai() {
-  const res = await axios.get(SCRAPE_URL, { timeout: 12000, headers: HEADERS });
-  const $ = cheerio.load(res.data);
-  const prices = [];
-
-  // Try common table patterns on the site
-  $('table tr, .price-table tr, .product-price tr').each((_, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 3) return;
-
-    const name = $(cells[0]).text().trim();
-    const unit = $(cells[1]).text().trim() || 'กก.';
-    const priceText = $(cells[2]).text().trim();
-
-    if (!name || !priceText) return;
-    const { min, max } = parsePriceRange(priceText);
-    if (!min) return;
-
-    prices.push({ name, unit, min, max, trend: '→' });
-  });
-
-  // Fallback: look for any element containing Thai price patterns
-  if (prices.length === 0) {
-    $('[class*="price"], [class*="Price"]').each((_, el) => {
-      const parent = $(el).closest('tr, li, .item, .row');
-      const nameEl = parent.find('[class*="name"], [class*="Name"], td:first-child');
-      const name = nameEl.first().text().trim();
-      const priceText = $(el).text().trim();
-      if (!name || !priceText) return;
-      const { min, max } = parsePriceRange(priceText);
-      if (!min) return;
-      prices.push({ name, unit: 'กก.', min, max, trend: '→' });
-    });
-  }
-
+function parseJson(text) {
+  const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const prices = JSON.parse(clean);
+  if (!Array.isArray(prices) || prices.length === 0) throw new Error('empty array');
   return prices;
 }
 
-async function scrapeFruitPrices() {
-  try {
-    const prices = await scrapeFromTalaadthai();
-    if (prices.length > 0) {
-      console.log(`Scraped ${prices.length} prices from talaadthai.com`);
-      return prices;
+// ─── Step 1: Grounded search ──────────────────────────────────────────────────
+
+async function fetchPricesWithGrounding() {
+  for (const model of GROUNDING_MODELS) {
+    try {
+      console.log(`🔍 กำลังค้นหาราคาผลไม้ด้วย Gemini (${model}) + Google Search...`);
+      const { text, sources } = await callGeminiWithGrounding(model);
+      const prices = parseJson(text);
+      console.log(`✅ ได้ราคา ${prices.length} รายการ จาก ${model}`);
+      return { prices, sources, model };
+    } catch (err) {
+      if (err.quota) {
+        console.warn(`[${model}] quota=0 — ข้ามไปยัง model ถัดไป`);
+        continue;
+      }
+      console.warn(`[${model}] ล้มเหลว: ${err.message}`);
     }
-    throw new Error('No prices parsed from page');
-  } catch (err) {
-    console.warn(`Scrape failed (${err.message}), using mock data`);
-    return MOCK_PRICES.map((p) => ({
-      ...p,
-      _mock: true,
-      date: new Date().toISOString().slice(0, 10),
-    }));
   }
+  return null;
 }
 
-module.exports = { scrapeFruitPrices, MOCK_PRICES };
+// ─── Step 2: Main ─────────────────────────────────────────────────────────────
+
+async function getFruitPrices() {
+  console.log('🍍 เริ่มดึงราคาผลไม้ด้วย Google Search Grounding...');
+
+  const result = await fetchPricesWithGrounding();
+
+  const date = new Date().toLocaleDateString('th-TH', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    weekday: 'long', timeZone: 'Asia/Bangkok',
+  });
+
+  if (result) {
+    return { prices: result.prices, date, sources: result.sources, model: result.model };
+  }
+
+  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
+  return { prices: MOCK_PRICES, date, sources: [], model: 'mock' };
+}
+
+// ─── Step 3: Format ───────────────────────────────────────────────────────────
+
+const EMOJI_MAP = {
+  ทุเรียน: '🍈', มังคุด: '🟣', เงาะ: '🔴', ลำไย: '🟡',
+  ลิ้นจี่: '🍒', ลองกอง: '🟤', มะม่วง: '🥭',
+  สับปะรด: '🍍', กล้วย: '🍌', มะละกอ: '🧡',
+};
+
+function getEmoji(name) {
+  for (const [key, emoji] of Object.entries(EMOJI_MAP)) {
+    if (name.includes(key)) return emoji;
+  }
+  return '🍎';
+}
+
+function formatPriceMessage({ prices, date }) {
+  const sep   = '─'.repeat(25);
+  const lines = prices
+    .map(p => `${getEmoji(p.name)} ${p.name}: ${p.price} ${p.unit} ${p.trend}`)
+    .join('\n');
+
+  return [
+    `🌿 ราคาผลไม้วันนี้`,
+    `📅 ${date}`,
+    sep,
+    lines,
+    sep,
+    `📰 ข้อมูลจากข่าวเกษตรไทย`,
+    ``,
+    `💊 ดูแลสวนให้ดี กดดูโปรโมชั่นปุ๋ยด้านล่าง ↓`,
+  ].join('\n');
+}
+
+module.exports = { getFruitPrices, formatPriceMessage };
+
+// ─── CLI test ─────────────────────────────────────────────────────────────────
+if (require.main === module) {
+  getFruitPrices()
+    .then(data => {
+      console.log('\n' + '='.repeat(40));
+      console.log(formatPriceMessage(data));
+      console.log('='.repeat(40));
+      console.log('\nraw prices:');
+      data.prices.forEach(p =>
+        console.log(`  ${p.name}: ${p.price} ${p.unit} ${p.trend}${p.source ? ' [' + p.source + ']' : ''}`)
+      );
+      if (data.sources?.length) {
+        console.log('\ngrounding sources:', data.sources.slice(0, 5));
+      }
+      console.log('model used:', data.model);
+    })
+    .catch(err => console.error('Fatal:', err.message));
+}

@@ -1,69 +1,94 @@
-const zlib = require('zlib');
 const axios = require('axios');
+const { createCanvas } = require('@napi-rs/canvas');
 const { messagingApi } = require('@line/bot-sdk');
 
-// ── Minimal PNG generator (no deps) ──────────────────────────────────────────
-
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    t[i] = c;
-  }
-  return t;
-})();
-
-function crc32(buf) {
-  let crc = -1;
-  for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
-  return (crc ^ -1) >>> 0;
-}
-
-function pngChunk(type, data) {
-  const t = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.allocUnsafe(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.allocUnsafe(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
-  return Buffer.concat([lenBuf, t, data, crcBuf]);
-}
-
-// Creates a 2500×843 PNG: left = orange, divider = white, right = purple
 function createRichMenuPNG(width = 2500, height = 843) {
-  const mid = Math.floor(width / 2);
-  const divW = 6; // divider width px
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const mid = width / 2;
 
-  const row = Buffer.allocUnsafe(1 + width * 3);
-  row[0] = 0; // filter: None
-  for (let x = 0; x < width; x++) {
-    const o = 1 + x * 3;
-    if (x >= mid - divW && x < mid + divW) {
-      row[o] = 255; row[o + 1] = 255; row[o + 2] = 255;        // white divider
-    } else if (x < mid) {
-      row[o] = 243; row[o + 1] = 156; row[o + 2] = 18;         // orange #f39c12
-    } else {
-      row[o] = 142; row[o + 1] = 68;  row[o + 2] = 173;        // purple #8e44ad
-    }
+  // Left side — orange
+  ctx.fillStyle = '#f39c12';
+  ctx.fillRect(0, 0, mid, height);
+
+  // Right side — purple
+  ctx.fillStyle = '#8e44ad';
+  ctx.fillRect(mid, 0, mid, height);
+
+  // White divider
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(mid - 3, 0, 6, height);
+
+  // Semi-transparent overlay for depth
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(0, height - 80, mid - 3, 80);
+  ctx.fillRect(mid + 3, height - 80, mid, 80);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Left icon: simple fruit circle
+  const lx = mid / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.arc(lx, height / 2 - 120, 130, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+  // leaf
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath();
+  ctx.ellipse(lx + 30, height / 2 - 258, 40, 18, Math.PI / 4, 0, Math.PI * 2);
+  ctx.fill();
+  // price tag lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const y = height / 2 - 145 + i * 38;
+    const w = [80, 120, 60][i];
+    ctx.beginPath();
+    ctx.moveTo(lx - w / 2, y);
+    ctx.lineTo(lx + w / 2, y);
+    ctx.stroke();
   }
 
-  const rawData = Buffer.concat(Array(height).fill(row));
-  const compressed = zlib.deflateSync(rawData, { level: 9 });
+  // Left label
+  ctx.font = 'bold 110px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('ราคาวันนี้', lx, height / 2 + 120);
 
-  const IHDR = Buffer.allocUnsafe(13);
-  IHDR.writeUInt32BE(width, 0);
-  IHDR.writeUInt32BE(height, 4);
-  IHDR[8] = 8; IHDR[9] = 2; IHDR[10] = 0; IHDR[11] = 0; IHDR[12] = 0;
+  // Right icon: star burst (promotion)
+  const rx = mid + mid / 2;
+  const starPoints = 8;
+  const outerR = 130;
+  const innerR = 65;
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  for (let i = 0; i < starPoints * 2; i++) {
+    const angle = (i * Math.PI) / starPoints - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    if (i === 0) ctx.moveTo(rx + r * Math.cos(angle), height / 2 - 120 + r * Math.sin(angle));
+    else ctx.lineTo(rx + r * Math.cos(angle), height / 2 - 120 + r * Math.sin(angle));
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+  // percent symbol
+  ctx.font = 'bold 100px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fillText('%', rx, height / 2 - 120);
 
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
-    pngChunk('IHDR', IHDR),
-    pngChunk('IDAT', compressed),
-    pngChunk('IEND', Buffer.alloc(0)),
-  ]);
+  // Right label
+  ctx.font = 'bold 110px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('โปรโมชั่น', rx, height / 2 + 120);
+
+  return canvas.toBuffer('image/png');
 }
-
-// ── Rich Menu ─────────────────────────────────────────────────────────────────
 
 function getClient() {
   return new messagingApi.MessagingApiClient({
@@ -86,7 +111,6 @@ async function createAndSetRichMenu() {
   const client = getClient();
   await deleteExistingDefault(client);
 
-  // 1. Create rich menu structure
   const { richMenuId } = await client.createRichMenu({
     size: { width: 2500, height: 843 },
     selected: true,
@@ -115,7 +139,6 @@ async function createAndSetRichMenu() {
   });
   console.log('Rich menu created:', richMenuId);
 
-  // 2. Generate and upload image (pure Node.js PNG, no lib needed)
   const imageBuffer = createRichMenuPNG();
   console.log(`PNG generated: ${(imageBuffer.length / 1024).toFixed(1)} KB`);
 
@@ -133,7 +156,6 @@ async function createAndSetRichMenu() {
   );
   console.log('Image uploaded');
 
-  // 3. Set as default for all users
   await client.setDefaultRichMenu(richMenuId);
   console.log('Rich menu set as default');
 

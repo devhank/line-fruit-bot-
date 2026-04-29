@@ -62,7 +62,15 @@ app.post('/admin/setup-richmenu', express.json(), async (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   startScheduler();
+
+  if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    try {
+      await createAndSetRichMenu();
+    } catch (err) {
+      console.warn('Rich menu auto-setup failed:', err.message);
+    }
+  }
 });

@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "line-fruit-bot",
   "version": "1.0.0",
   "description": "LINE OA Bot สำหรับขายผลไม้ พร้อมระบบแจ้งราคาอัตโนมัติ",
@@ -10,16 +10,24 @@
     "start": "node src/index.js",
     "dev": "node src/index.js"
   },
-  "keywords": ["line-bot", "fruit", "thailand"],
+  "keywords": [
+    "line-bot",
+    "fruit",
+    "thailand"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@line/bot-sdk": "^11.0.0",
+    "@napi-rs/canvas": "^0.1.100",
     "axios": "^1.15.2",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
+    "duck-duck-scrape": "^2.2.7",
     "express": "^4.22.1",
     "firebase-admin": "^13.8.0",
-    "node-cron": "^4.2.1"
+    "node-cron": "^4.2.1",
+    "xml2js": "^0.6.2"
   }
 }

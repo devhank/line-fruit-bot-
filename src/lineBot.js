@@ -1,6 +1,6 @@
 const { middleware, messagingApi } = require('@line/bot-sdk');
-const { scrapeFruitPrices } = require('./scraper');
-const { buildFlexMessage } = require('./broadcast');
+const { getFruitPrices, formatPriceMessage } = require('./scraper');
+const { buildTextMessage } = require('./broadcast');
 const { saveUser, getLatestPrices } = require('./firebase');
 
 // Lazy init — read env vars at request time, not at module load
@@ -49,10 +49,13 @@ async function handleMessage(event) {
 
   try {
     if (priceKeywords.some((k) => text.includes(k))) {
-      const prices = (await getLatestPrices().catch(() => null)) || (await scrapeFruitPrices());
+      const cachedPrices = await getLatestPrices().catch(() => null);
+      const data = cachedPrices
+        ? { prices: cachedPrices, date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Bangkok' }) }
+        : await getFruitPrices();
       await client.replyMessage({
         replyToken: event.replyToken,
-        messages: [buildFlexMessage(prices)],
+        messages: [buildTextMessage(formatPriceMessage(data))],
       });
     } else if (helpKeywords.some((k) => text.includes(k))) {
       await client.replyMessage({
@@ -60,7 +63,7 @@ async function handleMessage(event) {
         messages: [
           {
             type: 'text',
-            text: '📋 วิธีใช้งาน\n\n• พิมพ์ "ราคา" → ดูราคาผลไม้วันนี้\n• บอทจะส่งราคาให้อัตโนมัติทุกเช้า 07:00 น.\n\nข้อมูลจาก: ตลาดไท',
+            text: '📋 วิธีใช้งาน\n\n• พิมพ์ "ราคา" → ดูราคาผลไม้วันนี้\n• บอทจะส่งราคาให้อัตโนมัติทุกเช้า 07:00 น.\n\nข้อมูลจาก: กรมส่งเสริมการเกษตร / j-pad.net',
           },
         ],
       });
@@ -86,10 +89,13 @@ async function handlePostback(event) {
 
   try {
     if (data === 'action=price') {
-      const prices = (await getLatestPrices().catch(() => null)) || (await scrapeFruitPrices());
+      const cachedPrices = await getLatestPrices().catch(() => null);
+      const priceData = cachedPrices
+        ? { prices: cachedPrices, date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Bangkok' }) }
+        : await getFruitPrices();
       await client.replyMessage({
         replyToken: event.replyToken,
-        messages: [buildFlexMessage(prices)],
+        messages: [buildTextMessage(formatPriceMessage(priceData))],
       });
     } else if (data === 'action=promotion') {
       await client.replyMessage({

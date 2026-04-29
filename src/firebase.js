@@ -52,10 +52,11 @@ function getDb() {
 async function savePriceSnapshot(prices) {
   const db = getDb();
   const today = new Date().toISOString().slice(0, 10);
+  const sources = [...new Set(prices.map(p => p.source).filter(Boolean))];
   await db.collection('price_snapshots').doc(today).set({
     prices,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    source: prices[0]?._mock ? 'mock' : 'talaadthai',
+    sources: sources.length ? sources : ['mock'],
   });
 }
 
