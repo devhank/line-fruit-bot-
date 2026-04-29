@@ -1,3 +1,6 @@
+'use strict';
+const fs    = require('fs');
+const path  = require('path');
 const axios = require('axios');
 const sharp = require('sharp');
 const { messagingApi } = require('@line/bot-sdk');
@@ -7,34 +10,47 @@ const H   = 1686;
 const COL = W / 2;   // 1250
 const ROW = H / 2;   // 843
 
-function buildSvg() {
-  const cells = [
-    { x: 0,   y: 0,   color: '#FF8C00', emoji: '🍈', label: 'Fruit Price' },
-    { x: COL, y: 0,   color: '#228B22', emoji: '🥬', label: 'Veg Price'   },
-    { x: 0,   y: ROW, color: '#1E90FF', emoji: '🌿', label: 'Promotion'   },
-    { x: COL, y: ROW, color: '#006400', emoji: '🌱', label: 'My Garden'   },
-  ];
+// Read font once at module load — embed as base64 in every SVG
+const FONT_PATH = path.join(__dirname, '..', 'assets', 'fonts', 'Sarabun-Bold.ttf');
+const FONT_B64  = fs.readFileSync(FONT_PATH).toString('base64');
 
-  const rects = cells.map(c =>
+const CELLS = [
+  { x: 0,   y: 0,   color: '#FF8C00', emoji: '🍈', label: 'ราคาผลไม้' },
+  { x: COL, y: 0,   color: '#228B22', emoji: '🥬', label: 'ราคาผัก' },
+  { x: 0,   y: ROW, color: '#1E90FF', emoji: '🌿', label: 'โปรโมชั่นปุ๋ย' },
+  { x: COL, y: ROW, color: '#006400', emoji: '🌱', label: 'บำรุงสวนของคุณ' },
+];
+
+function buildSvg() {
+  const rects = CELLS.map(c =>
     `<rect x="${c.x}" y="${c.y}" width="${COL}" height="${ROW}" fill="${c.color}"/>`
   ).join('\n  ');
 
-  const texts = cells.map(c => {
+  const texts = CELLS.map(c => {
     const cx = c.x + COL / 2;
-    const ey = c.y + ROW / 2 - 80;   // emoji baseline
-    const ly = c.y + ROW / 2 + 110;  // label baseline
+    const ey = c.y + ROW / 2 - 70;   // emoji
+    const ly = c.y + ROW / 2 + 130;  // label
     return (
-      `<text x="${cx}" y="${ey}" font-size="200" text-anchor="middle" dominant-baseline="middle">${c.emoji}</text>` +
-      `<text x="${cx}" y="${ly}" font-size="120" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="middle" font-family="Arial, Helvetica, sans-serif">${c.label}</text>`
+      `<text x="${cx}" y="${ey}" font-size="190" text-anchor="middle" dominant-baseline="middle">${c.emoji}</text>\n  ` +
+      `<text x="${cx}" y="${ly}" font-size="115" font-weight="bold" fill="white" ` +
+      `text-anchor="middle" dominant-baseline="middle" font-family="Sarabun, sans-serif">${c.label}</text>`
     );
   }).join('\n  ');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <defs>
+    <style>
+      @font-face {
+        font-family: 'Sarabun';
+        src: url('data:font/truetype;base64,${FONT_B64}');
+        font-weight: bold;
+      }
+    </style>
+  </defs>
   ${rects}
-  <!-- grid lines -->
-  <line x1="${COL}" y1="0" x2="${COL}" y2="${H}" stroke="white" stroke-width="4"/>
-  <line x1="0" y1="${ROW}" x2="${W}" y2="${ROW}" stroke="white" stroke-width="4"/>
+  <line x1="${COL}" y1="0" x2="${COL}" y2="${H}" stroke="white" stroke-width="6"/>
+  <line x1="0" y1="${ROW}" x2="${W}" y2="${ROW}" stroke="white" stroke-width="6"/>
   ${texts}
 </svg>`;
 }
