@@ -1,67 +1,47 @@
 const axios = require('axios');
-const { createCanvas } = require('@napi-rs/canvas');
+const sharp = require('sharp');
 const { messagingApi } = require('@line/bot-sdk');
 
-const W = 2500;
-const H = 1686;
+const W   = 2500;
+const H   = 1686;
 const COL = W / 2;   // 1250
 const ROW = H / 2;   // 843
 
-const CELLS = [
-  { x: 0,   y: 0,   color: '#FF8C00', emoji: '🍈', label: 'ราคาผลไม้' },
-  { x: COL, y: 0,   color: '#228B22', emoji: '🥬', label: 'ราคาผัก' },
-  { x: 0,   y: ROW, color: '#1E90FF', emoji: '🌿', label: 'โปรโมชั่นปุ๋ย' },
-  { x: COL, y: ROW, color: '#006400', emoji: '🌱', label: 'บำรุงสวนของคุณ' },
-];
+function buildSvg() {
+  const cells = [
+    { x: 0,   y: 0,   color: '#FF8C00', emoji: '🍈', label: 'Fruit Price' },
+    { x: COL, y: 0,   color: '#228B22', emoji: '🥬', label: 'Veg Price'   },
+    { x: 0,   y: ROW, color: '#1E90FF', emoji: '🌿', label: 'Promotion'   },
+    { x: COL, y: ROW, color: '#006400', emoji: '🌱', label: 'My Garden'   },
+  ];
 
-function createRichMenuPNG() {
-  const canvas = createCanvas(W, H);
-  const ctx    = canvas.getContext('2d');
+  const rects = cells.map(c =>
+    `<rect x="${c.x}" y="${c.y}" width="${COL}" height="${ROW}" fill="${c.color}"/>`
+  ).join('\n  ');
 
-  for (const cell of CELLS) {
-    // Background
-    ctx.fillStyle = cell.color;
-    ctx.fillRect(cell.x, cell.y, COL, ROW);
+  const texts = cells.map(c => {
+    const cx = c.x + COL / 2;
+    const ey = c.y + ROW / 2 - 80;   // emoji baseline
+    const ly = c.y + ROW / 2 + 110;  // label baseline
+    return (
+      `<text x="${cx}" y="${ey}" font-size="200" text-anchor="middle" dominant-baseline="middle">${c.emoji}</text>` +
+      `<text x="${cx}" y="${ly}" font-size="120" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="middle" font-family="Arial, Helvetica, sans-serif">${c.label}</text>`
+    );
+  }).join('\n  ');
 
-    // Subtle dark overlay at bottom of each cell for depth
-    const grad = ctx.createLinearGradient(cell.x, cell.y, cell.x, cell.y + ROW);
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.25)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(cell.x, cell.y, COL, ROW);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  ${rects}
+  <!-- grid lines -->
+  <line x1="${COL}" y1="0" x2="${COL}" y2="${H}" stroke="white" stroke-width="4"/>
+  <line x1="0" y1="${ROW}" x2="${W}" y2="${ROW}" stroke="white" stroke-width="4"/>
+  ${texts}
+</svg>`;
+}
 
-    // Large emoji circle background
-    const cx = cell.x + COL / 2;
-    const cy = cell.y + ROW / 2 - 80;
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 180, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Emoji
-    ctx.font = '220px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(cell.emoji, cx, cy);
-
-    // Label
-    ctx.font = 'bold 115px sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 12;
-    ctx.fillText(cell.label, cx, cell.y + ROW - 130);
-    ctx.shadowBlur = 0;
-  }
-
-  // Grid lines
-  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.lineWidth = 6;
-  // vertical centre
-  ctx.beginPath(); ctx.moveTo(COL, 0); ctx.lineTo(COL, H); ctx.stroke();
-  // horizontal centre
-  ctx.beginPath(); ctx.moveTo(0, ROW); ctx.lineTo(W, ROW); ctx.stroke();
-
-  return canvas.toBuffer('image/png');
+async function createRichMenuPNG() {
+  const svg = buildSvg();
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 function getClient() {
@@ -111,7 +91,7 @@ async function createAndSetRichMenu() {
   });
   console.log('Rich menu created:', richMenuId);
 
-  const imageBuffer = createRichMenuPNG();
+  const imageBuffer = await createRichMenuPNG();
   console.log(`PNG generated: ${(imageBuffer.length / 1024).toFixed(1)} KB`);
 
   await axios.post(
