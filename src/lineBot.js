@@ -1,9 +1,8 @@
 const { middleware, messagingApi } = require('@line/bot-sdk');
-const { getFruitPrices, formatPriceMessage } = require('./scraper');
+const { getFruitPrices, getVegPrices, formatPriceMessage, formatVegMessage } = require('./scraper');
 const { buildTextMessage } = require('./broadcast');
 const { saveUser, getLatestPrices } = require('./firebase');
 
-// Lazy init — read env vars at request time, not at module load
 function getMiddleware() {
   return middleware({ channelSecret: process.env.LINE_CHANNEL_SECRET });
 }
@@ -18,6 +17,15 @@ function getClient() {
   });
 }
 
+const PROMOTION_TEXT =
+  `🌿 โปรโมชั่นพิเศษเดือนนี้\n` +
+  `🧪 VAMAX + CABMAX ชุดคู่ราคาพิเศษ\n` +
+  `ธาตุอาหารรวม 7 ชนิด + แคลเซียม-โบรอน\n` +
+  `✅ ผลใหญ่ ผิวสวย ไม่แตก ไม่ร่วง\n` +
+  `💰 ราคาพิเศษสำหรับสมาชิก LINE นี้\n` +
+  `📦 ส่ง COD ทั่วประเทศ\n` +
+  `📲 สั่งซื้อ: m.me/cabmax999`;
+
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
 async function handleFollow(event) {
@@ -27,12 +35,10 @@ async function handleFollow(event) {
     await saveUser(profile.userId, profile.displayName).catch(() => {});
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [
-        {
-          type: 'text',
-          text: `สวัสดีครับ คุณ${profile.displayName} 🍑\nยินดีต้อนรับสู่บอทราคาผลไม้!\nพิมพ์ "ราคา" เพื่อดูราคาผลไม้ล่าสุด`,
-        },
-      ],
+      messages: [{
+        type: 'text',
+        text: `สวัสดีครับ คุณ${profile.displayName} 🍑\nยินดีต้อนรับสู่บอทราคาผลไม้!\nพิมพ์ "ราคา" เพื่อดูราคาผลไม้ล่าสุด`,
+      }],
     });
   } catch (err) {
     console.error('handleFollow error:', err.message);
@@ -44,11 +50,18 @@ async function handleMessage(event) {
   const client = getClient();
   const text = event.message.text.trim().toLowerCase();
 
-  const priceKeywords = ['ราคา', 'price', 'fruit', 'ผลไม้', 'วันนี้'];
-  const helpKeywords = ['help', 'ช่วยเหลือ', 'วิธีใช้', 'menu', 'เมนู'];
+  const fruitKeywords = ['ราคา', 'price', 'fruit', 'ผลไม้', 'วันนี้'];
+  const vegKeywords   = ['ผัก', 'veg', 'vegetable'];
+  const helpKeywords  = ['help', 'ช่วยเหลือ', 'วิธีใช้', 'menu', 'เมนู'];
 
   try {
-    if (priceKeywords.some((k) => text.includes(k))) {
+    if (vegKeywords.some(k => text.includes(k))) {
+      const data = await getVegPrices();
+      await client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [buildTextMessage(formatVegMessage(data))],
+      });
+    } else if (fruitKeywords.some(k => text.includes(k))) {
       const cachedPrices = await getLatestPrices().catch(() => null);
       const data = cachedPrices
         ? { prices: cachedPrices, date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Bangkok' }) }
@@ -57,25 +70,18 @@ async function handleMessage(event) {
         replyToken: event.replyToken,
         messages: [buildTextMessage(formatPriceMessage(data))],
       });
-    } else if (helpKeywords.some((k) => text.includes(k))) {
+    } else if (helpKeywords.some(k => text.includes(k))) {
       await client.replyMessage({
         replyToken: event.replyToken,
-        messages: [
-          {
-            type: 'text',
-            text: '📋 วิธีใช้งาน\n\n• พิมพ์ "ราคา" → ดูราคาผลไม้วันนี้\n• บอทจะส่งราคาให้อัตโนมัติทุกเช้า 07:00 น.\n\nข้อมูลจาก: กรมส่งเสริมการเกษตร / j-pad.net',
-          },
-        ],
+        messages: [{
+          type: 'text',
+          text: '📋 วิธีใช้งาน\n\n• พิมพ์ "ราคา" → ดูราคาผลไม้วันนี้\n• พิมพ์ "ผัก" → ดูราคาผักวันนี้\n• บอทจะส่งราคาให้อัตโนมัติทุกเช้า 07:00 น.',
+        }],
       });
     } else {
       await client.replyMessage({
         replyToken: event.replyToken,
-        messages: [
-          {
-            type: 'text',
-            text: 'พิมพ์ "ราคา" เพื่อดูราคาผลไม้ล่าสุด 🍑',
-          },
-        ],
+        messages: [{ type: 'text', text: 'พิมพ์ "ราคา" เพื่อดูราคาผลไม้ หรือ "ผัก" เพื่อดูราคาผัก 🍑' }],
       });
     }
   } catch (err) {
@@ -88,7 +94,7 @@ async function handlePostback(event) {
   const { data } = event.postback;
 
   try {
-    if (data === 'action=price') {
+    if (data === 'action=fruit_prices' || data === 'action=price') {
       const cachedPrices = await getLatestPrices().catch(() => null);
       const priceData = cachedPrices
         ? { prices: cachedPrices, date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Bangkok' }) }
@@ -97,15 +103,18 @@ async function handlePostback(event) {
         replyToken: event.replyToken,
         messages: [buildTextMessage(formatPriceMessage(priceData))],
       });
+
+    } else if (data === 'action=veg_prices') {
+      const vegData = await getVegPrices();
+      await client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [buildTextMessage(formatVegMessage(vegData))],
+      });
+
     } else if (data === 'action=promotion') {
       await client.replyMessage({
         replyToken: event.replyToken,
-        messages: [
-          {
-            type: 'text',
-            text: '🎉 โปรโมชั่นพิเศษวันนี้\n\n🍑 ซื้อมังคุด 1 กก. แถมเงาะ 500 กรัม\n🍈 ทุเรียนหมอนทอง ราคาพิเศษ 180 บ./กก.\n🍇 องุ่นเขียวนำเข้า ลดราคา 20%\n\n📞 สั่งซื้อ: โทร 02-XXX-XXXX',
-          },
-        ],
+        messages: [{ type: 'text', text: PROMOTION_TEXT }],
       });
     }
   } catch (err) {
@@ -119,52 +128,15 @@ async function handleWebhook(req, res) {
   res.sendStatus(200);
   const events = req.body.events || [];
   await Promise.all(
-    events.map((event) => {
+    events.map(event => {
       switch (event.type) {
-        case 'follow':
-          return handleFollow(event);
-        case 'message':
-          return handleMessage(event);
-        case 'postback':
-          return handlePostback(event);
-        default:
-          return Promise.resolve();
+        case 'follow':   return handleFollow(event);
+        case 'message':  return handleMessage(event);
+        case 'postback': return handlePostback(event);
+        default:         return Promise.resolve();
       }
     })
   );
 }
 
-// ─── Rich menu ────────────────────────────────────────────────────────────────
-
-async function setupRichMenu() {
-  const client = getClient();
-
-  const richMenu = {
-    size: { width: 2500, height: 843 },
-    selected: true,
-    name: 'Fruit Bot Menu',
-    chatBarText: 'เมนู',
-    areas: [
-      {
-        bounds: { x: 0, y: 0, width: 1250, height: 843 },
-        action: { type: 'postback', label: 'ราคาวันนี้', data: 'action=price' },
-      },
-      {
-        bounds: { x: 1250, y: 0, width: 1250, height: 843 },
-        action: { type: 'message', label: 'ช่วยเหลือ', text: 'help' },
-      },
-    ],
-  };
-
-  try {
-    const { richMenuId } = await client.createRichMenu({ richMenu });
-    await client.setDefaultRichMenu(richMenuId);
-    console.log('Rich menu created:', richMenuId);
-    return richMenuId;
-  } catch (err) {
-    console.warn('Rich menu setup skipped:', err.message);
-    return null;
-  }
-}
-
-module.exports = { webhookMiddleware, handleWebhook, setupRichMenu };
+module.exports = { webhookMiddleware, handleWebhook };

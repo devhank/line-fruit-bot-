@@ -1,23 +1,17 @@
 'use strict';
 require('dotenv').config();
 
-// Models ordered by preference — gemini-2.0-flash first (user request), fallback to 2.5-x
+// Models ordered by preference — gemini-2.0-flash first, fallback to 2.5-x
 const GROUNDING_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
+// ─── Fruit data ───────────────────────────────────────────────────────────────
+
 const FRUIT_LIST = [
-  'ทุเรียนหมอนทอง',
-  'ทุเรียนชะนี',
-  'มังคุด',
-  'เงาะโรงเรียน',
-  'ลำไย',
-  'ลิ้นจี่',
-  'ลองกอง',
-  'มะม่วงน้ำดอกไม้',
-  'สับปะรด',
-  'กล้วยหอม',
+  'ทุเรียนหมอนทอง', 'ทุเรียนชะนี', 'มังคุด', 'เงาะโรงเรียน', 'ลำไย',
+  'ลิ้นจี่', 'ลองกอง', 'มะม่วงน้ำดอกไม้', 'สับปะรด', 'กล้วยหอม',
 ];
 
-const MOCK_PRICES = [
+const MOCK_FRUIT_PRICES = [
   { name: 'ทุเรียนหมอนทอง', price: '130-150', unit: 'บาท/กก.', trend: '→' },
   { name: 'มังคุด',          price: '80-100',  unit: 'บาท/กก.', trend: '↑' },
   { name: 'เงาะโรงเรียน',   price: '40-60',   unit: 'บาท/กก.', trend: '↓' },
@@ -28,32 +22,52 @@ const MOCK_PRICES = [
   { name: 'กล้วยหอม',        price: '25-35',   unit: 'บาท/หวี', trend: '→' },
 ];
 
+// ─── Veg data ─────────────────────────────────────────────────────────────────
+
+const VEG_LIST = [
+  'พริกขี้หนู', 'พริกจินดา', 'มะนาว', 'แตงกวา', 'มะเขือ',
+  'กะหล่ำปลี', 'ผักบุ้ง', 'คะน้า', 'ต้นหอม', 'ผักชี',
+];
+
+const MOCK_VEG_PRICES = [
+  { name: 'พริกขี้หนู', price: '60-80',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'พริกจินดา', price: '40-60',  unit: 'บาท/กก.', trend: '↑' },
+  { name: 'มะนาว',     price: '20-30',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'แตงกวา',    price: '15-20',  unit: 'บาท/กก.', trend: '↓' },
+  { name: 'มะเขือ',    price: '25-35',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'กะหล่ำปลี', price: '20-30',  unit: 'บาท/กก.', trend: '↓' },
+  { name: 'ผักบุ้ง',   price: '15-25',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'คะน้า',     price: '20-30',  unit: 'บาท/กก.', trend: '↑' },
+  { name: 'ต้นหอม',    price: '30-50',  unit: 'บาท/กก.', trend: '→' },
+  { name: 'ผักชี',     price: '40-60',  unit: 'บาท/กก.', trend: '↑' },
+];
+
 // ─── Gemini v1beta + Google Search Grounding ─────────────────────────────────
 
-function buildPricePrompt() {
+function buildPrompt(list, type) {
   return (
-    `คุณเป็นผู้เชี่ยวชาญด้านราคาผลไม้ไทย ค้นหาราคาผลไม้จากแหล่งข่าวล่าสุด\n\n` +
+    `คุณเป็นผู้เชี่ยวชาญด้านราคา${type}ไทย ค้นหาราคาจากแหล่งข่าวล่าสุด\n\n` +
     `กฎสำคัญ:\n` +
     `1. ตอบเฉพาะ JSON array เท่านั้น ไม่มีข้อความอื่น ไม่มี markdown\n` +
-    `2. ถ้าหาราคาไม่เจอให้ข้ามผลไม้นั้น\n` +
+    `2. ถ้าหาราคาไม่เจอให้ข้ามรายการนั้น\n` +
     `3. ราคาใส่เป็น string เช่น "130-150" หรือ "150"\n` +
     `4. trend: "↑" ราคาขึ้น, "↓" ราคาลง, "→" ทรงตัว\n` +
-    `5. unit ใส่หน่วยจริง เช่น "บาท/กก." หรือ "บาท/ลูก"\n` +
-    `6. source ใส่ชื่อแหล่งข่าว เช่น "ตลาดไท" หรือ "กรมส่งเสริมการเกษตร"\n\n` +
-    `ผลไม้ที่ต้องการ: ${FRUIT_LIST.join(', ')}\n\n` +
+    `5. unit ใส่หน่วยจริง เช่น "บาท/กก." หรือ "บาท/มัด"\n` +
+    `6. source ใส่ชื่อแหล่งข่าว เช่น "ตลาดไท" หรือ "กรมการค้าภายใน"\n\n` +
+    `รายการที่ต้องการ: ${list.join(', ')}\n\n` +
     `ตัวอย่าง output:\n` +
     `[{"name":"ทุเรียนหมอนทอง","price":"130-150","unit":"บาท/กก.","trend":"↓","source":"ตลาดไท"}]\n\n` +
-    `ราคาผลไม้ไทยในตลาดวันนี้คือเท่าไหร่`
+    `ราคา${type}ไทยในตลาดวันนี้คือเท่าไหร่`
   );
 }
 
-async function callGeminiWithGrounding(model) {
+async function callGeminiGrounded(model, prompt) {
   const key = process.env.GEMINI_API_KEY;
   if (!key || key === 'your_gemini_api_key_here') throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   const body = {
-    contents: [{ parts: [{ text: buildPricePrompt() }] }],
+    contents: [{ parts: [{ text: prompt }] }],
     tools: [{ google_search: {} }],
     generationConfig: { temperature: 0.1 },
   };
@@ -99,68 +113,78 @@ function parseJson(text) {
   return prices;
 }
 
-// ─── Step 1: Grounded search ──────────────────────────────────────────────────
-
-async function fetchPricesWithGrounding() {
+async function fetchWithGrounding(list, type) {
+  const prompt = buildPrompt(list, type);
   for (const model of GROUNDING_MODELS) {
     try {
-      console.log(`🔍 กำลังค้นหาราคาผลไม้ด้วย Gemini (${model}) + Google Search...`);
-      const { text, sources } = await callGeminiWithGrounding(model);
+      console.log(`🔍 กำลังค้นหาราคา${type}ด้วย Gemini (${model}) + Google Search...`);
+      const { text, sources } = await callGeminiGrounded(model, prompt);
       const prices = parseJson(text);
       console.log(`✅ ได้ราคา ${prices.length} รายการ จาก ${model}`);
       return { prices, sources, model };
     } catch (err) {
-      if (err.quota) {
-        console.warn(`[${model}] quota=0 — ข้ามไปยัง model ถัดไป`);
-        continue;
-      }
+      if (err.quota) { console.warn(`[${model}] quota=0 — ข้ามไปยัง model ถัดไป`); continue; }
       console.warn(`[${model}] ล้มเหลว: ${err.message}`);
     }
   }
   return null;
 }
 
-// ─── Step 2: Main ─────────────────────────────────────────────────────────────
-
-async function getFruitPrices() {
-  console.log('🍍 เริ่มดึงราคาผลไม้ด้วย Google Search Grounding...');
-
-  const result = await fetchPricesWithGrounding();
-
-  const date = new Date().toLocaleDateString('th-TH', {
+function thaiDate() {
+  return new Date().toLocaleDateString('th-TH', {
     year: 'numeric', month: 'long', day: 'numeric',
     weekday: 'long', timeZone: 'Asia/Bangkok',
   });
-
-  if (result) {
-    return { prices: result.prices, date, sources: result.sources, model: result.model };
-  }
-
-  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
-  return { prices: MOCK_PRICES, date, sources: [], model: 'mock' };
 }
 
-// ─── Step 3: Format ───────────────────────────────────────────────────────────
+// ─── getFruitPrices ───────────────────────────────────────────────────────────
 
-const EMOJI_MAP = {
+async function getFruitPrices() {
+  console.log('🍍 เริ่มดึงราคาผลไม้ด้วย Google Search Grounding...');
+  const result = await fetchWithGrounding(FRUIT_LIST, 'ผลไม้');
+  const date   = thaiDate();
+  if (result) return { prices: result.prices, date, sources: result.sources, model: result.model };
+  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
+  return { prices: MOCK_FRUIT_PRICES, date, sources: [], model: 'mock' };
+}
+
+// ─── getVegPrices ─────────────────────────────────────────────────────────────
+
+async function getVegPrices() {
+  console.log('🥬 เริ่มดึงราคาผักด้วย Google Search Grounding...');
+  const result = await fetchWithGrounding(VEG_LIST, 'ผัก');
+  const date   = thaiDate();
+  if (result) return { prices: result.prices, date, sources: result.sources, model: result.model };
+  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
+  return { prices: MOCK_VEG_PRICES, date, sources: [], model: 'mock' };
+}
+
+// ─── Format ───────────────────────────────────────────────────────────────────
+
+const FRUIT_EMOJI_MAP = {
   ทุเรียน: '🍈', มังคุด: '🟣', เงาะ: '🔴', ลำไย: '🟡',
   ลิ้นจี่: '🍒', ลองกอง: '🟤', มะม่วง: '🥭',
   สับปะรด: '🍍', กล้วย: '🍌', มะละกอ: '🧡',
 };
 
-function getEmoji(name) {
-  for (const [key, emoji] of Object.entries(EMOJI_MAP)) {
+const VEG_EMOJI_MAP = {
+  พริก: '🌶️', มะนาว: '🍋', แตงกวา: '🥒', มะเขือ: '🍆',
+  กะหล่ำ: '🥬', ผักบุ้ง: '🌿', คะน้า: '🥦', ต้นหอม: '🧅',
+  ผักชี: '🌿',
+};
+
+function getEmoji(name, map) {
+  for (const [key, emoji] of Object.entries(map)) {
     if (name.includes(key)) return emoji;
   }
-  return '🍎';
+  return '🌱';
 }
 
 function formatPriceMessage({ prices, date }) {
   const sep   = '─'.repeat(25);
   const lines = prices
-    .map(p => `${getEmoji(p.name)} ${p.name}: ${p.price} ${p.unit} ${p.trend}`)
+    .map(p => `${getEmoji(p.name, FRUIT_EMOJI_MAP)} ${p.name}: ${p.price} ${p.unit} ${p.trend}`)
     .join('\n');
-
   return [
     `🌿 ราคาผลไม้วันนี้`,
     `📅 ${date}`,
@@ -173,22 +197,39 @@ function formatPriceMessage({ prices, date }) {
   ].join('\n');
 }
 
-module.exports = { getFruitPrices, formatPriceMessage };
+function formatVegMessage({ prices, date }) {
+  const sep   = '─'.repeat(25);
+  const lines = prices
+    .map(p => `${getEmoji(p.name, VEG_EMOJI_MAP)} ${p.name}: ${p.price} ${p.unit} ${p.trend}`)
+    .join('\n');
+  return [
+    `🥬 ราคาผักวันนี้`,
+    `📅 ${date}`,
+    sep,
+    lines,
+    sep,
+    `📰 ข้อมูลจากข่าวเกษตรไทย`,
+    ``,
+    `💊 ดูแลสวนให้ดี กดดูโปรโมชั่นปุ๋ยด้านล่าง ↓`,
+  ].join('\n');
+}
+
+module.exports = { getFruitPrices, getVegPrices, formatPriceMessage, formatVegMessage };
 
 // ─── CLI test ─────────────────────────────────────────────────────────────────
 if (require.main === module) {
-  getFruitPrices()
+  const type = process.argv[2] === 'veg' ? 'veg' : 'fruit';
+  const fn   = type === 'veg' ? getVegPrices : getFruitPrices;
+  const fmt  = type === 'veg' ? formatVegMessage : formatPriceMessage;
+  fn()
     .then(data => {
       console.log('\n' + '='.repeat(40));
-      console.log(formatPriceMessage(data));
+      console.log(fmt(data));
       console.log('='.repeat(40));
       console.log('\nraw prices:');
       data.prices.forEach(p =>
         console.log(`  ${p.name}: ${p.price} ${p.unit} ${p.trend}${p.source ? ' [' + p.source + ']' : ''}`)
       );
-      if (data.sources?.length) {
-        console.log('\ngrounding sources:', data.sources.slice(0, 5));
-      }
       console.log('model used:', data.model);
     })
     .catch(err => console.error('Fatal:', err.message));
