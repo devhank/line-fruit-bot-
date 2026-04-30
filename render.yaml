@@ -31,6 +31,10 @@
       - key: FIREBASE_PRIVATE_KEY
         sync: false          # วาง private key ทั้งก้อนใน Render Dashboard
 
+      # ── Brave Search ─────────────────────────────────────
+      - key: BRAVE_API_KEY
+        sync: false          # ใส่ใน Render Dashboard
+
       # ── Admin ─────────────────────────────────────────────
       - key: ADMIN_TOKEN
         generateValue: true  # Render สร้าง random token ให้อัตโนมัติ

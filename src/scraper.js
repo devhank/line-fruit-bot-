@@ -1,14 +1,18 @@
 'use strict';
 require('dotenv').config();
 
-// Models ordered by preference — gemini-2.0-flash first, fallback to 2.5-x
 const GROUNDING_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
-// ─── Fruit data ───────────────────────────────────────────────────────────────
+// ─── Lists ────────────────────────────────────────────────────────────────────
 
 const FRUIT_LIST = [
   'ทุเรียนหมอนทอง', 'ทุเรียนชะนี', 'มังคุด', 'เงาะโรงเรียน', 'ลำไย',
   'ลิ้นจี่', 'ลองกอง', 'มะม่วงน้ำดอกไม้', 'สับปะรด', 'กล้วยหอม',
+];
+
+const VEG_LIST = [
+  'พริกขี้หนู', 'พริกจินดา', 'มะนาว', 'แตงกวา', 'มะเขือ',
+  'กะหล่ำปลี', 'ผักบุ้ง', 'คะน้า', 'ต้นหอม', 'ผักชี',
 ];
 
 const MOCK_FRUIT_PRICES = [
@@ -20,13 +24,6 @@ const MOCK_FRUIT_PRICES = [
   { name: 'มะม่วงน้ำดอกไม้', price: '40-60',  unit: 'บาท/กก.', trend: '→' },
   { name: 'สับปะรด',         price: '15-25',   unit: 'บาท/กก.', trend: '↓' },
   { name: 'กล้วยหอม',        price: '25-35',   unit: 'บาท/หวี', trend: '→' },
-];
-
-// ─── Veg data ─────────────────────────────────────────────────────────────────
-
-const VEG_LIST = [
-  'พริกขี้หนู', 'พริกจินดา', 'มะนาว', 'แตงกวา', 'มะเขือ',
-  'กะหล่ำปลี', 'ผักบุ้ง', 'คะน้า', 'ต้นหอม', 'ผักชี',
 ];
 
 const MOCK_VEG_PRICES = [
@@ -42,28 +39,11 @@ const MOCK_VEG_PRICES = [
   { name: 'ผักชี',     price: '40-60',  unit: 'บาท/กก.', trend: '↑' },
 ];
 
-// ─── Gemini v1beta + Google Search Grounding ─────────────────────────────────
-
-function buildPrompt(list, type) {
-  return (
-    `คุณเป็นผู้เชี่ยวชาญด้านราคา${type}ไทย ค้นหาราคาจากแหล่งข่าวล่าสุด\n\n` +
-    `กฎสำคัญ:\n` +
-    `1. ตอบเฉพาะ JSON array เท่านั้น ไม่มีข้อความอื่น ไม่มี markdown\n` +
-    `2. ถ้าหาราคาไม่เจอให้ข้ามรายการนั้น\n` +
-    `3. ราคาใส่เป็น string เช่น "130-150" หรือ "150"\n` +
-    `4. trend: "↑" ราคาขึ้น, "↓" ราคาลง, "→" ทรงตัว\n` +
-    `5. unit ใส่หน่วยจริง เช่น "บาท/กก." หรือ "บาท/มัด"\n` +
-    `6. source ใส่ชื่อแหล่งข่าว เช่น "ตลาดไท" หรือ "กรมการค้าภายใน"\n\n` +
-    `รายการที่ต้องการ: ${list.join(', ')}\n\n` +
-    `ตัวอย่าง output:\n` +
-    `[{"name":"ทุเรียนหมอนทอง","price":"130-150","unit":"บาท/กก.","trend":"↓","source":"ตลาดไท"}]\n\n` +
-    `ราคา${type}ไทยในตลาดวันนี้คือเท่าไหร่`
-  );
-}
+// ─── Gemini Grounding ─────────────────────────────────────────────────────────
 
 async function callGeminiGrounded(model, prompt) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key || key === 'your_gemini_api_key_here') throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
+  if (!key) throw new Error('GEMINI_API_KEY ไม่ได้ตั้งค่า');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   const body = {
@@ -89,13 +69,10 @@ async function callGeminiGrounded(model, prompt) {
         throw new Error(msg);
       }
 
-      const text         = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const hasGrounding = !!data.candidates?.[0]?.groundingMetadata;
-      const sources      = data.candidates?.[0]?.groundingMetadata?.groundingChunks
-        ?.map(c => c.web?.title || c.web?.uri || '')
-        .filter(Boolean) || [];
+      const text    = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const sources = data.candidates?.[0]?.groundingMetadata?.groundingChunks
+        ?.map(c => c.web?.title || c.web?.uri || '').filter(Boolean) || [];
 
-      console.log(`✅ Gemini (${model}) ตอบแล้ว — grounding=${hasGrounding}, sources=${sources.length}`);
       return { text, sources };
     } catch (err) {
       if (err.quota) throw err;
@@ -106,57 +83,111 @@ async function callGeminiGrounded(model, prompt) {
   throw new Error(`[${model}] หมด retry`);
 }
 
-function parseJson(text) {
-  const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-  const prices = JSON.parse(clean);
-  if (!Array.isArray(prices) || prices.length === 0) throw new Error('empty array');
-  return prices;
-}
+// ─── Search ONE item ──────────────────────────────────────────────────────────
 
-async function fetchWithGrounding(list, type) {
-  const prompt = buildPrompt(list, type);
+async function searchSinglePrice(name) {
+  const prompt =
+    `ค้นหาราคา${name}ในตลาดไทยวันนี้จากข่าวหรือแหล่งข้อมูลล่าสุด\n` +
+    `ตอบเฉพาะ JSON object เดียว ไม่มีข้อความอื่น ไม่มี markdown:\n` +
+    `{"name":"${name}","price":"ราคา","unit":"หน่วย","trend":"↑หรือ↓หรือ→","source":"แหล่งข่าว"}\n` +
+    `ถ้าไม่พบข้อมูลวันนี้ ตอบว่า: null`;
+
   for (const model of GROUNDING_MODELS) {
     try {
-      console.log(`🔍 กำลังค้นหาราคา${type}ด้วย Gemini (${model}) + Google Search...`);
       const { text, sources } = await callGeminiGrounded(model, prompt);
-      const prices = parseJson(text);
-      console.log(`✅ ได้ราคา ${prices.length} รายการ จาก ${model}`);
-      return { prices, sources, model };
+      const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      if (clean === 'null' || !clean) return null;
+      const item = JSON.parse(clean);
+      if (!item?.price || String(item.price) === 'null') return null;
+      if (!item.source && sources.length) item.source = sources[0];
+      // fix unit ที่ไม่มี "บาท" เช่น Gemini ตอบแค่ "กิโลกรัม"
+      if (item.unit && !item.unit.includes('บาท')) item.unit = 'บาท/' + item.unit;
+      return item;
     } catch (err) {
-      if (err.quota) { console.warn(`[${model}] quota=0 — ข้ามไปยัง model ถัดไป`); continue; }
-      console.warn(`[${model}] ล้มเหลว: ${err.message}`);
+      if (err.quota) { console.warn(`  [${model}] quota=0`); continue; }
+      console.warn(`  [${name}][${model}] ${err.message}`);
     }
   }
   return null;
 }
+
+// ─── Build daily prices — searches ALL items one by one ───────────────────────
+
+async function buildDailyPrices() {
+  const fruits     = [];
+  const vegetables = [];
+
+  console.log('\n🍍 ค้นหาราคาผลไม้ทีละชนิด...');
+  for (const name of FRUIT_LIST) {
+    process.stdout.write(`  🔍 ${name}... `);
+    const item = await searchSinglePrice(name);
+    if (item) {
+      fruits.push(item);
+      console.log(`✅ ${item.price} ${item.unit}${item.source ? ' [' + item.source + ']' : ''}`);
+    } else {
+      console.log('⚠️ ไม่พบ');
+    }
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
+  console.log('\n🥬 ค้นหาราคาผักทีละชนิด...');
+  for (const name of VEG_LIST) {
+    process.stdout.write(`  🔍 ${name}... `);
+    const item = await searchSinglePrice(name);
+    if (item) {
+      vegetables.push(item);
+      console.log(`✅ ${item.price} ${item.unit}${item.source ? ' [' + item.source + ']' : ''}`);
+    } else {
+      console.log('⚠️ ไม่พบ');
+    }
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
+  console.log(`\n📊 รวม: ผลไม้ ${fruits.length} รายการ, ผัก ${vegetables.length} รายการ`);
+  return { fruits, vegetables, date: thaiDate() };
+}
+
+// ─── Public API — cache-first ─────────────────────────────────────────────────
+
+async function getFruitPrices() {
+  const date = thaiDate();
+  try {
+    const { getDailyCache } = require('./firebase');
+    const cached = await getDailyCache('fruits');
+    if (cached?.length) {
+      console.log(`📦 ใช้ราคาผลไม้จาก cache วันนี้ (${cached.length} รายการ)`);
+      return { prices: cached, date, sources: [], model: 'cache' };
+    }
+  } catch (e) {
+    console.warn('Cache read failed:', e.message);
+  }
+  console.warn('⚠️ ไม่มี cache — ใช้ mock data');
+  return { prices: MOCK_FRUIT_PRICES, date, sources: [], model: 'mock' };
+}
+
+async function getVegPrices() {
+  const date = thaiDate();
+  try {
+    const { getDailyCache } = require('./firebase');
+    const cached = await getDailyCache('vegetables');
+    if (cached?.length) {
+      console.log(`📦 ใช้ราคาผักจาก cache วันนี้ (${cached.length} รายการ)`);
+      return { prices: cached, date, sources: [], model: 'cache' };
+    }
+  } catch (e) {
+    console.warn('Cache read failed:', e.message);
+  }
+  console.warn('⚠️ ไม่มี cache — ใช้ mock data');
+  return { prices: MOCK_VEG_PRICES, date, sources: [], model: 'mock' };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function thaiDate() {
   return new Date().toLocaleDateString('th-TH', {
     year: 'numeric', month: 'long', day: 'numeric',
     weekday: 'long', timeZone: 'Asia/Bangkok',
   });
-}
-
-// ─── getFruitPrices ───────────────────────────────────────────────────────────
-
-async function getFruitPrices() {
-  console.log('🍍 เริ่มดึงราคาผลไม้ด้วย Google Search Grounding...');
-  const result = await fetchWithGrounding(FRUIT_LIST, 'ผลไม้');
-  const date   = thaiDate();
-  if (result) return { prices: result.prices, date, sources: result.sources, model: result.model };
-  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
-  return { prices: MOCK_FRUIT_PRICES, date, sources: [], model: 'mock' };
-}
-
-// ─── getVegPrices ─────────────────────────────────────────────────────────────
-
-async function getVegPrices() {
-  console.log('🥬 เริ่มดึงราคาผักด้วย Google Search Grounding...');
-  const result = await fetchWithGrounding(VEG_LIST, 'ผัก');
-  const date   = thaiDate();
-  if (result) return { prices: result.prices, date, sources: result.sources, model: result.model };
-  console.warn('⚠️ Grounding ล้มเหลวทุก model — ใช้ mock data');
-  return { prices: MOCK_VEG_PRICES, date, sources: [], model: 'mock' };
 }
 
 // ─── Format ───────────────────────────────────────────────────────────────────
@@ -214,23 +245,23 @@ function formatVegMessage({ prices, date }) {
   ].join('\n');
 }
 
-module.exports = { getFruitPrices, getVegPrices, formatPriceMessage, formatVegMessage };
+module.exports = {
+  buildDailyPrices,
+  getFruitPrices,
+  getVegPrices,
+  formatPriceMessage,
+  formatVegMessage,
+  FRUIT_LIST,
+  VEG_LIST,
+};
 
 // ─── CLI test ─────────────────────────────────────────────────────────────────
 if (require.main === module) {
-  const type = process.argv[2] === 'veg' ? 'veg' : 'fruit';
-  const fn   = type === 'veg' ? getVegPrices : getFruitPrices;
-  const fmt  = type === 'veg' ? formatVegMessage : formatPriceMessage;
-  fn()
-    .then(data => {
+  buildDailyPrices()
+    .then(({ fruits, vegetables, date }) => {
       console.log('\n' + '='.repeat(40));
-      console.log(fmt(data));
-      console.log('='.repeat(40));
-      console.log('\nraw prices:');
-      data.prices.forEach(p =>
-        console.log(`  ${p.name}: ${p.price} ${p.unit} ${p.trend}${p.source ? ' [' + p.source + ']' : ''}`)
-      );
-      console.log('model used:', data.model);
+      console.log('ผลไม้:', fruits.map(p => `${p.name} ${p.price} ${p.unit}`).join(', '));
+      console.log('ผัก:',   vegetables.map(p => `${p.name} ${p.price} ${p.unit}`).join(', '));
     })
     .catch(err => console.error('Fatal:', err.message));
 }

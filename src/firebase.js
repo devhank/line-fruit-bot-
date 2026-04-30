@@ -81,4 +81,23 @@ async function getAllUserIds() {
   return snapshot.docs.map((d) => d.id);
 }
 
-module.exports = { initFirebase, getDb, savePriceSnapshot, getLatestPrices, saveUser, getAllUserIds };
+// ─── Daily price cache (one document per day) ─────────────────────────────────
+
+async function setDailyCache(type, prices) {
+  const db    = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  await db.collection('price_cache').doc(today).set(
+    { [type]: prices, [`${type}At`]: admin.firestore.FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+  console.log(`[Firebase] cache saved — ${type} ${prices.length} items`);
+}
+
+async function getDailyCache(type) {
+  const db    = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const doc   = await db.collection('price_cache').doc(today).get();
+  return doc.exists ? (doc.data()[type] || null) : null;
+}
+
+module.exports = { initFirebase, getDb, savePriceSnapshot, getLatestPrices, saveUser, getAllUserIds, setDailyCache, getDailyCache };
